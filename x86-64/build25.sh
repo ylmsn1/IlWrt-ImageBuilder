@@ -105,7 +105,31 @@ if echo "$PACKAGES" | grep -q "luci-app-ssr-plus"; then
 else
     echo "⚪️ 未选择 luci-app-ssr-plus"
 fi
+# ============= 第三方插件集成：代理 + 工具 =============
+NIKKI_VER="v1.26.2"
+NIKKI_URL="https://github.com/nikkinikki-org/OpenWrt-nikki/releases/download/${NIKKI_VER}/nikki_x86_64-openwrt-25.12.tar.gz"
+echo "⬇️ 下载 nikki ${NIKKI_VER}"
+mkdir -p /tmp/nikki /home/build/immortalwrt/packages
+wget -q --tries=3 -O /tmp/nikki.tar.gz "$NIKKI_URL"
+tar -xzf /tmp/nikki.tar.gz -C /tmp/nikki
+ls /tmp/nikki/*.apk >/dev/null 2>&1 || { echo "❌ nikki apk 没下载到，终止构建"; exit 1; }
+# 只取四件套，不取 mihomo-alpha（两个内核 CONFLICTS 互斥，会打架）
+for f in /tmp/nikki/nikki-*.apk /tmp/nikki/luci-app-nikki-*.apk \
+         /tmp/nikki/luci-i18n-nikki-zh-cn-*.apk /tmp/nikki/mihomo-meta-*.apk; do
+  [ -f "$f" ] && cp -v "$f" /home/build/immortalwrt/packages/
+done
 
+# ---- 代理：nikki 主力 + passwall 备用（不要同时启用）----
+PACKAGES="$PACKAGES nikki luci-app-nikki luci-i18n-nikki-zh-cn mihomo-meta"
+PACKAGES="$PACKAGES luci-app-passwall luci-i18n-passwall-zh-cn"
+PACKAGES="$PACKAGES xray-core sing-box hysteria tuic-client v2ray-geoip v2ray-geosite"
+
+# ---- 工具 ----
+PACKAGES="$PACKAGES luci-i18n-nlbwmon-zh-cn"
+PACKAGES="$PACKAGES luci-i18n-zerotier-zh-cn"
+
+ls -lah /home/build/immortalwrt/packages/
+echo "=== 最终包列表 ==="; echo "$PACKAGES"
 # 构建镜像
 echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
 echo "$PACKAGES"
