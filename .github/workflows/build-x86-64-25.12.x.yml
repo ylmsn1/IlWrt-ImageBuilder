@@ -12,7 +12,7 @@ on:
           - 25.12.1
           - 25.12.2
       custom_router_ip:
-        description: "请设置路由器的管理地址(仅对多网口路由器有效) 格式:192.168.x.1 或 10.x.x.1"
+        description: "旁路由模式下无效，后台固定为 192.168.1.253，保持默认即可"
         required: true
         default: "192.168.100.1"
       profile:
@@ -138,9 +138,10 @@ jobs:
            <img src="https://img.shields.io/badge/若下载慢可套用国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge"/>
           </a>
           
-          - 🏠 **后台地址**: ${{ github.event.inputs.custom_router_ip }}
+          - 🏠 **后台地址**: http://192.168.1.253
           - 👤 **用户名**: root
-          - 🔑 **密码**: 无
+          - 🔑 **密码**: 首次登录后请立即设置 root 密码
+          - 📌 需要代理的设备，网关和 DNS 都要手动填 192.168.1.253
           EOF
 
           if [ "${{ github.event.inputs.include_docker }}" == "yes" ]; then
@@ -153,7 +154,9 @@ jobs:
       - name: Upload ImmortWrt as release assets
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: Autobuild-x86-64
+          # 每次构建用独立 tag，旧固件保留在 Releases 里可随时回滚；
+          # 固定 tag 会让新构建直接覆盖旧镜像，出问题时没有退路。
+          tag_name: Autobuild-x86-64-${{ inputs.luci_version }}-r${{ github.run_number }}
           body_path: ${{ github.workspace }}/router-info.md
           files: |
             ${{ github.workspace }}/bin/targets/x86/64/*squashfs-combined-efi.img.gz
