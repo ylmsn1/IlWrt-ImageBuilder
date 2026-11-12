@@ -5,21 +5,21 @@ on:
       luci_version:
         description: "选择luci版本"
         required: false
-        default: "25.12.1"
+        default: "25.12.2"
         type: choice
         options:
           - 25.12.0
           - 25.12.1
           - 25.12.2
       custom_router_ip:
-        description: "旁路由模式下无效，后台固定为 192.168.1.253，保持默认即可"
+        description: "仅上游 99-custom.sh 读取；本方案最终被 99-z-bypass.sh 覆盖为 192.168.1.253，保持默认即可"
         required: true
-        default: "192.168.100.1"
+        default: "192.168.1.253"
       profile:
         description: '选择软件包空间大小'
         required: true
         type: choice
-        default: '1G'
+        default: '2G'
         options:
           - '1G'
           - '2G'
@@ -32,9 +32,9 @@ on:
         default: false
       include_docker:
         description: |
-          是否编译 Docker 插件
+          是否编译 Docker 插件（旁路由默认不装）
         required: true
-        default: 'yes'
+        default: 'no'
         type: choice
         options:
           - 'yes'
@@ -59,7 +59,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout code
