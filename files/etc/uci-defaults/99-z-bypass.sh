@@ -13,6 +13,10 @@
 # 接线警告：所有物理网口都并入了 br-lan，只接一根上行网线到光猫。
 # 绝不能把两个网口接到同一台光猫或同一台交换机，否则二层环路会让全网瘫痪
 # （br-lan 默认不启用 STP）。下面留了可选开关，需要防呆时可取消注释。
+#
+# 2026-11-08 19:26 dsh 复核后修订：Q1 dns_listen、Q9 api_secret、
+# 其他发现② http_port。本文件只在首次开机执行，以下改动对当前运行的固件无效，
+# 也不必为它专门重建；下次因其他原因构建时随仓库一起带上即可。
 # ============================================================================
 
 # ---------------- 按光猫实测页面填写的两个常量 ----------------
@@ -100,7 +104,15 @@ uci set firewall.@defaults[0].flow_offloading='0'
 uci set firewall.@defaults[0].flow_offloading_hw='0'
 uci commit firewall
 
-# 内核默认会给同网段客户端发 ICMP 重定向，把它们引回光猫，代理随之失效
+# 内核默认会给同网段客户端发 ICMP 重定向，把它们引回光猫，代理随之失效。
+# 内核语义（include/linux/inetdevice.h）：
+#   IN_DEV_TX_REDIRECTS = IN_DEV_ORCONF  → send_redirects 是 OR：all 或任一接口为 1 就仍发重定向
+#   IN_DEV_RPFILTER     = IN_DEV_MAXCONF → rp_filter 是 MAX：取 all 与接口值中较大者
+#   accept_redirects    = IN_DEV_ANDCONF → all=0 即可
+# 所以只写 all=0 / default=0 不会传播到「已经存在」的 br-lan，必须显式写 br-lan 三行。
+# 开机时若 br-lan 尚未创建，sysctl 会跳过这几行，/etc/hotplug.d/net/00-sysctl
+# 会在接口 add 时补应用含接口名的行。br-lan 行放在最后，避免个别 sysctl 实现
+# 遇错提前退出导致 all/default 未被应用。
 mkdir -p /etc/sysctl.d
 cat > /etc/sysctl.d/99-bypass-router.conf <<'EOF'
 net.ipv4.conf.all.send_redirects = 0
@@ -109,6 +121,9 @@ net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.rp_filter = 0
 net.ipv4.conf.default.rp_filter = 0
+net.ipv4.conf.br-lan.send_redirects = 0
+net.ipv4.conf.br-lan.accept_redirects = 0
+net.ipv4.conf.br-lan.rp_filter = 0
 EOF
 sysctl -p /etc/sysctl.d/99-bypass-router.conf >/dev/null 2>&1
 # 本脚本首次开机后会被系统删除，sysctl 文件不在 /etc/config 里、sysupgrade 默认不保留，
@@ -130,13 +145,17 @@ fi
 # Nikki 用 yq 深合并把 UCI 的 mixin 项并进上传的 YAML：模板独有的键保留，
 # 同名键被 UCI 覆盖；overwrite_* 为 1 才会删模板的 DNS/规则键（出厂全 0）。
 # 下面对齐端口与 IPv6，并显式固定覆盖开关为 0，保住模板的分流规则。
+# 2026-11-08 dsh 复核后修正三处（只对「下次重建」生效，当前固件不受影响）：
+#   Q1        dns_listen  ':1053' -> '[::]:1053'（LuCI ipaddrport(1) 红框会拦住整页保存）
+#   Q9        api_secret  改用 /proc/sys/kernel/random/uuid（部分 BusyBox 的 od 不支持 -A/-t）
+#   其他发现② http_port   7890 -> 0（allow-lan=true 且无认证，别把出口开放给局域网）
 if uci -q get nikki.mixin >/dev/null 2>&1; then
     uci set nikki.mixin.ipv6='0'
     uci set nikki.mixin.dns_ipv6='0'
-    uci set nikki.mixin.http_port='7890'          # 模板 port: 7890
+    uci set nikki.mixin.http_port='0'             # 关闭无认证的 HTTP 手动代理；要调试再临时开
     uci set nikki.mixin.socks_port='0'            # 模板 socks-port: 0，别抢 7891
     uci set nikki.mixin.mixed_port='0'            # 模板 mixed-port: 0
-    uci set nikki.mixin.dns_listen=':1053'        # 模板 dns.listen: ':1053'
+    uci set nikki.mixin.dns_listen='[::]:1053'    # 出厂值；':1053' 会被 LuCI 标红并拦住整页保存
     uci set nikki.mixin.fake_ip_filter='0'
     uci set nikki.mixin.dns_nameserver='0'
     uci set nikki.mixin.dns_nameserver_policy='0'
@@ -149,8 +168,10 @@ if uci -q get nikki.mixin >/dev/null 2>&1; then
     # 出厂 api_secret 为空而 external-controller 监听 [::]:9090，
     # 局域网里任何设备都能控制内核。首次启动生成随机密钥；LuCI 的
     # 「打开面板」会读取运行配置里的 secret 自动带上，不需要手动填写。
+    # 不用 od -An -tx1：部分 BusyBox 构建缺 -A/-t，会静默输出空串，
+    # 被 [ -n ] 挡掉后密钥仍为空（dsh 复核 Q9）。uuid 去连字符得到 32 位 hex。
     if [ -z "$(uci -q get nikki.mixin.api_secret)" ]; then
-        API_SECRET=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+        API_SECRET=$(tr -d '-' < /proc/sys/kernel/random/uuid)
         [ -n "$API_SECRET" ] && uci set nikki.mixin.api_secret="$API_SECRET"
     fi
     uci commit nikki
