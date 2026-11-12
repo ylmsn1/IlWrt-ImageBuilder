@@ -148,11 +148,18 @@ PACKAGES="$PACKAGES luci-i18n-zerotier-zh-cn"      # 移动家宽 CGNAT 无公�
 # 对 4-6MB/s 的链路没有可感知收益，少一个包少一处变量。
 
 # 构建参数建议（J4125 / 8G 内存 / 256G 盘，仅手机 + 电脑两台终端，光猫拨号 + 旁路由）：
-#   profile          = 2G                # 不装 Docker，规则集 + 双内核足够
+# 2026-11-08 dsh 复核 Q2/Q4：下面几行已与 workflow 的 default 逐项对齐，照默认值直接跑即可。
+#   profile          = 2G                # 不装 Docker 时实际只占两三百兆，2G 绰绰有余
 #   include_docker   = no               # 旁路由不跑容器，省内存和 CPU
 #   enable_pppoe     = no               # 拨号由光猫负责，这一项务必保持 no
-#   custom_router_ip 任意              # 本模式不读它，旁路由固定 192.168.1.253（光猫 DHCP 池外）
+#   custom_router_ip = 192.168.1.253    # 仅上游 99-custom.sh 读取，最终被 99-z-bypass.sh 覆盖
 #   luci_version     = 25.12.2         # 每次构建的 release tag 会带上版本号和运行号，可回滚
+#
+# 关于 include_docker：保留第 68-71 行的条件块，只把默认改成 no（dsh Q5 建议删块）。
+# 理由：删块后 workflow 的 include_docker 输入与 router-info.md 的「默认带docker」
+# 文案会变成假信息；保留条件块则默认不装 Docker，将来确需容器仍可临时选 yes。
+# 若 dsh 坚持删块，请一并清理 workflow 的 include_docker 输入、第 114/126 行环境变量
+# 与第 147-152 行的 router-info 文案。
 
 ls -lah /home/build/immortalwrt/packages/
 echo "=== 最终包列表 ==="; echo "$PACKAGES"
