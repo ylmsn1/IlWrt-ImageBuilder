@@ -1,0 +1,5 @@
+只允许 url 全空的 clean 模板进仓库。
+工作副本 Mihomo-Nikki-v7.5.yaml 含订阅链接与 token，只能留在本机，
+绝不 commit 到 GitHub（含 fork、Issue、Release 附件）。
+Mihomo-Nikki-.yaml
+!Mihomo-Nikki--clean.yaml
