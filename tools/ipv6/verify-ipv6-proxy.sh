@@ -214,9 +214,31 @@ cat <<'EOF'
   ★ 闸门 7「真的代理了」：前面六道只证明配置对、fake 池可达，没有一条
     证明某个境外站点确实经节点出去。三条必须【同时】成立：
       1) 客户端浏览器打开 ipv6.google.com；
-      2) 面板「连接」出现目标 IP 为 fdfe:dcba:9876::x、chains 非 DIRECT 的连接；
+      2) 在设备上跑下面的 API 命令，出现 v6 地址且 chains[0] 非 DIRECT 的连接；
       3) 同一时刻 nslookup -type=AAAA www.google.com 192.168.1.253 返回 fdfe:。
     只有 1)+2) 可能只是「进了 tun 又直连出去」，必须补齐 3)。
+
+    【14:28 实测纠正】别用 `curl .../connections | grep fdfe` 找正向证据：
+    mihomo 的 Redir/TUN 入站 metadata.destinationIP 记录的是【还原后的真实 IP】，
+    fake-ip 池地址不进 connections API。本机 14:28 实测 88 条连接里 fdfe 与
+    198.18 命中数均为 0（连已在生效的 v4 fake-ip 都不显示），那条命令必假阴性；
+    且 destinationIP 有 75 条为空，只 grep 它会二次漏报。
+    改用下面这条（v6 出现在 sourceIP / destinationIP / remoteDestination 任一字段）：
+
+      S=$(sed -n 's/^secret: *//p' /etc/nikki/run/config.yaml | tr -d "'\"")
+      curl -s -H "Authorization: Bearer $S" http://127.0.0.1:9090/connections \
+       | jq -r '.connections[]
+         | select(.chains[0] != "DIRECT")
+         | select(((.metadata.sourceIP//"") + " " + (.metadata.destinationIP//"")
+                   + " " + (.metadata.remoteDestination//"")) | contains(":"))
+         | "\(.metadata.sourceIP)  \(.metadata.host)  [\(.chains|join(" > "))]"' \
+       | sort -u
+
+    出现任意一行即通过。apply 前实测基线：v6 sourceIP 连接 0 条、非 DIRECT 1 条，
+    所以 apply 后冒出 v6 + 节点链就是强证据；secret 长度 16、API HTTP 200 已验证。
+    更硬的证据是 nft counter：访问前 / 后各跑一次
+      nft list table inet nikki | grep counter
+    对比 v6 相关规则的 packets 是否增长（本次基线：表存在、65 条 counter 规则）。
 
   ── 已知盲区（不是一次性验收项，每次换设备 / 换网络都要重查）──
   双 RA 的失败是【静默】的，没有任何日志会告诉你「这台设备其实走了光猫」：
@@ -251,8 +273,8 @@ cat <<'EOF'
   3  nslookup www.google.com .253 → 198.18.0.x      v4 没被带坏，掉了立刻回退
   4  ping -6 fdfe:dcba:9876::1（客户端）→ 通        icmpv6 redirect 接住
   5  route print -6 / 手机 WiFi 详情 → ::/0 指向旁路由 link-local
-  6  面板「连接」出现 v6 目标、链路非 DIRECT
-  7  ipv6.google.com + 面板 fdfe: 目标 + AAAA 返回 fdfe: 三条同时成立（真的代理了）
+  6  面板「连接」出现 v6 地址、链路非 DIRECT（别 grep fdfe，见 D 段实测纠正）
+  7  ipv6.google.com + API 出现 v6 且非 DIRECT + AAAA 返回 fdfe:，三条同时成立
 EOF
 if [ "$FAILS" -eq 0 ]; then
     echo "  A/A2/B/C 段全部通过。请继续完成 D 段客户端验收（闸门 2~7）。"
