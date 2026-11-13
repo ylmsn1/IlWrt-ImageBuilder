@@ -212,18 +212,28 @@ cat <<'EOF'
     不是配置写错；好处是广告/跟踪的 REJECT 首次对 v6 生效。
 
   ★ 闸门 7「真的代理了」：前面六道只证明配置对、fake 池可达，没有一条
-    证明某个境外站点确实经节点出去。三条必须【同时】成立：
-      1) 客户端浏览器打开 ipv6.google.com；
-      2) 在设备上跑下面的 API 命令，出现 v6 地址且 chains[0] 非 DIRECT 的连接；
-      3) 同一时刻 nslookup -type=AAAA www.google.com 192.168.1.253 返回 fdfe:。
-    只有 1)+2) 可能只是「进了 tun 又直连出去」，必须补齐 3)。
+    证明某个境外站点确实经节点出去。判据（15:15 修订）：
+      主判据  在设备上跑下面的 API 命令，出现【v6 源地址 + chains[0] 非 DIRECT】
+              的连接 —— 这是「v6 流量经节点出去」的直接证据，出现任意一行即通过。
+      辅判据  nslookup -type=AAAA www.google.com 192.168.1.253 返回 fdfe:，
+              且客户端 curl --noproxy '*' 经该 fdfe: 访问 www.google.com 得 200。
+    ★ 别用 ipv6.google.com 当闸门：它是 v6-only 域名，节点侧无 v6 出站就打不开。
+      15:12 实测连走 Nikki 的 HTTP 代理 192.168.1.253:7891（完全绕过 fake-ip 与
+      DNS 优先级）也是 12s 超时，同刻 www.google.com 是 200 / 0.51s ⇒ 与本机
+      IPv6 配置无关。14:40 那次 No-Go 就是被这个假阴性，加上当时客户端还没产生
+      境外 v6 流量，两条叠加误判的；15:09 / 15:11 复测已有 1 / 4 条 v6+节点链。
 
     【14:28 实测纠正】别用 `curl .../connections | grep fdfe` 找正向证据：
     mihomo 的 Redir/TUN 入站 metadata.destinationIP 记录的是【还原后的真实 IP】，
     fake-ip 池地址不进 connections API。本机 14:28 实测 88 条连接里 fdfe 与
     198.18 命中数均为 0（连已在生效的 v4 fake-ip 都不显示），那条命令必假阴性；
     且 destinationIP 有 75 条为空，只 grep 它会二次漏报。
-    改用下面这条（v6 出现在 sourceIP / destinationIP / remoteDestination 任一字段）：
+    【15:09 实测补充】本机 jq 编译时没带 ONIGURUMA，test() / match() 一律报
+    "jq was compiled without ONIGURUMA regex library"。用 test("bc40:|bc41:")
+    筛归属那条命令在这台设备上跑不通；下面用 contains(":")，不依赖正则。
+    要按前缀筛改用 startswith("2409:8a55:4f18:bc41:")。
+
+    主判据命令（v6 出现在 sourceIP / destinationIP / remoteDestination 任一字段）：
 
       S=$(sed -n 's/^secret: *//p' /etc/nikki/run/config.yaml | tr -d "'\"")
       curl -s -H "Authorization: Bearer $S" http://127.0.0.1:9090/connections \
@@ -236,14 +246,21 @@ cat <<'EOF'
 
     出现任意一行即通过。apply 前实测基线：v6 sourceIP 连接 0 条、非 DIRECT 1 条，
     所以 apply 后冒出 v6 + 节点链就是强证据；secret 长度 16、API HTTP 200 已验证。
-    更硬的证据是 nft counter：访问前 / 后各跑一次
+    15:11 实测 4 条，bc40:（手机 / 光猫前缀）与 bc41:（旁路由 PD 前缀）都有，
+    出口为香港 / 新加坡节点。更硬的证据是 nft counter：访问前 / 后各跑一次
       nft list table inet nikki | grep counter
     对比 v6 相关规则的 packets 是否增长（本次基线：表存在、65 条 counter 规则）。
+
+    【15:08 实测】nft list set inet nikki reserved_ip6 含 2001::/32（Teredo 段）。
+    光猫 RDNSS fe80::1 把 www.google.com 的 AAAA 污染成 2001::1：这地址既不可达、
+    又会命中保留集的 return 规则不进代理 ⇒ 默认 DNS 下访问必超时。这是光猫侧
+    行为（旁路由自己的 DNS 返回 fdfe: 完全正常），不是配置缺陷；正常境外服务
+    的 2606: / 2a00: / 2001:4860: 都不在该段内，不会误伤。
 
   ── 已知盲区（不是一次性验收项，每次换设备 / 换网络都要重查）──
   双 RA 的失败是【静默】的，没有任何日志会告诉你「这台设备其实走了光猫」：
     Windows   route print -6 看 ::/0 下一跳；
-    Android   无命令行，看 WiFi 详情网关，或用 ipv6.google.com + 面板对照；
+    Android   无命令行，看 WiFi 详情网关，或直接在面板搜这台设备的 v6 连接；
     FTTR 从光猫下还挂着的设备，也要抽查一台。
   别把「查过一次」当成永久有效。
 
@@ -274,7 +291,7 @@ cat <<'EOF'
   4  ping -6 fdfe:dcba:9876::1（客户端）→ 通        icmpv6 redirect 接住
   5  route print -6 / 手机 WiFi 详情 → ::/0 指向旁路由 link-local
   6  面板「连接」出现 v6 地址、链路非 DIRECT（别 grep fdfe，见 D 段实测纠正）
-  7  ipv6.google.com + API 出现 v6 且非 DIRECT + AAAA 返回 fdfe:，三条同时成立
+  7  API 出现 v6 源 + 非 DIRECT 节点链（主判据）；AAAA 返回 fdfe: 且双栈域名 200（辅）
 EOF
 if [ "$FAILS" -eq 0 ]; then
     echo "  A/A2/B/C 段全部通过。请继续完成 D 段客户端验收（闸门 2~7）。"
