@@ -40,7 +40,7 @@ on:
           - 'yes'
           - 'no'
       enable_pppoe:
-        description: "是否配置PPPoE拨号信息?"
+        description: "是否配置PPPoE拨号信息? 拨号由光猫负责，务必保持 no"
         required: true
         default: 'no'
         type: choice
@@ -74,7 +74,7 @@ jobs:
           echo "${{ github.event.inputs.custom_router_ip }}" > "${{ github.workspace }}/custom/custom_router_ip.txt"
           echo "您设置的路由器管理地址是:${{ github.event.inputs.custom_router_ip }}"
           # 后续步骤会将该文件映射到路由器/etc/config/custom_router_ip.txt 以便用于开机脚本99-custom.sh读取用户设置的ip
-      
+
       - name: Validate PPPoE Inputs
         run: |
           if [[ "${{ inputs.enable_pppoe }}" == "yes" ]]; then
@@ -83,7 +83,7 @@ jobs:
               exit 1
             fi
           fi
-      
+
       - name: Enable Store integration
         run: |
           if [ "${{ github.event.inputs.enable_store }}" == "true" ]; then
@@ -128,7 +128,7 @@ jobs:
             -e PPPOE_ACCOUNT=${{ inputs.pppoe_account }} \
             -e PPPOE_PASSWORD=${{ inputs.pppoe_password }} \
           immortalwrt/imagebuilder:x86-64-openwrt-${luci_version} /bin/bash /home/build/immortalwrt/build.sh
-          
+
 
       - name: Create info
         run: |
@@ -137,11 +137,14 @@ jobs:
           <a href="https://wkdaily.cpolar.cn/archives/1">
            <img src="https://img.shields.io/badge/若下载慢可套用国内加速站下载-FC7C0D?logo=github&logoColor=fff&labelColor=000&style=for-the-badge"/>
           </a>
-          
+
           - 🏠 **后台地址**: http://192.168.1.253
           - 👤 **用户名**: root
           - 🔑 **密码**: 首次登录后请立即设置 root 密码
           - 📌 需要代理的设备，网关和 DNS 都要手动填 192.168.1.253
+          - 🌐 **本固件默认代理 IPv6**：本机发 high 优先级 RA 接管客户端 v6 默认网关
+          - ⚠️ 同光猫下其它设备的 IPv6 默认网关也可能被接管；旁路由停机时它们的 v6 会中断
+          - ↩️ 回退：重刷 Releases 里不带 -v6 后缀的旧 tag 镜像
           EOF
 
           if [ "${{ github.event.inputs.include_docker }}" == "yes" ]; then
@@ -156,7 +159,8 @@ jobs:
         with:
           # 每次构建用独立 tag，旧固件保留在 Releases 里可随时回滚；
           # 固定 tag 会让新构建直接覆盖旧镜像，出问题时没有退路。
-          tag_name: Autobuild-x86-64-${{ inputs.luci_version }}-r${{ github.run_number }}
+          # -v6 后缀用于区分「IPv6 默认代理」与旧的纯 IPv4 固件。
+          tag_name: Autobuild-x86-64-${{ inputs.luci_version }}-r${{ github.run_number }}-v6
           body_path: ${{ github.workspace }}/router-info.md
           files: |
             ${{ github.workspace }}/bin/targets/x86/64/*squashfs-combined-efi.img.gz
